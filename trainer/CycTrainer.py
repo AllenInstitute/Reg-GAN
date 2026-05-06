@@ -1,40 +1,39 @@
-#!/usr/bin/python3
-
-import argparse
 import itertools
-import torchvision.transforms as transforms
+from functools import partial
+
+import wandb
+import torch.cuda
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 import os
-from .utils import LambdaLR,Logger,ReplayBuffer
-from .utils import weights_init_normal,get_config
+from .utils import ReplayBuffer, pad_to_size
 from .datasets import ImageDataset,ValDataset
 from Model.CycleGan import *
-from .utils import Resize,ToTensor,smooothing_loss
+from .utils import smooothing_loss
 from .utils import Logger
 from .reg import Reg
-from torchvision.transforms import RandomAffine,ToPILImage
+from torchvision.transforms import RandomAffine,ToPILImage, Normalize, ToTensor, Resize, Lambda
 from .transformer import Transformer_2D
 from skimage import measure
 import numpy as np
 import cv2
 
-class Cyc_Trainer():
+class Cyc_Trainer:
     def __init__(self, config):
         super().__init__()
         self.config = config
         ## def networks
-        self.netG_A2B = Generator(config['input_nc'], config['output_nc']).cuda()
-        self.netD_B = Discriminator(config['input_nc']).cuda()
+        self.netG_A2B = Generator(config['input_nc'], config['output_nc'])
+        self.netD_B = Discriminator(config['input_nc'])
         self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'], betas=(0.5, 0.999))
         
         if config['regist']:
-            self.R_A = Reg(config['size'], config['size'],config['input_nc'],config['input_nc']).cuda()
-            self.spatial_transform = Transformer_2D().cuda()
+            self.R_A = Reg(config['size'], config['size'],config['input_nc'],config['input_nc'])
+            self.spatial_transform = Transformer_2D()
             self.optimizer_R_A = torch.optim.Adam(self.R_A.parameters(), lr=config['lr'], betas=(0.5, 0.999))
         if config['bidirect']:
-            self.netG_B2A = Generator(config['input_nc'], config['output_nc']).cuda()
-            self.netD_A = Discriminator(config['input_nc']).cuda()
+            self.netG_B2A = Generator(config['input_nc'], config['output_nc'])
+            self.netD_A = Discriminator(config['input_nc'])
             self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters()),lr=config['lr'], betas=(0.5, 0.999))
             self.optimizer_D_A = torch.optim.Adam(self.netD_A.parameters(), lr=config['lr'], betas=(0.5, 0.999))
 
@@ -47,11 +46,10 @@ class Cyc_Trainer():
         self.L1_loss = torch.nn.L1Loss()
 
         # Inputs & targets memory allocation
-        Tensor = torch.cuda.FloatTensor if config['cuda'] else torch.Tensor
-        self.input_A = Tensor(config['batchSize'], config['input_nc'], config['size'], config['size'])
-        self.input_B = Tensor(config['batchSize'], config['output_nc'], config['size'], config['size'])
-        self.target_real = Variable(Tensor(1,1).fill_(1.0), requires_grad=False)
-        self.target_fake = Variable(Tensor(1,1).fill_(0.0), requires_grad=False)
+        self.input_A = torch.Tensor(config['batchSize'], config['input_nc'], config['size'], config['size'])
+        self.input_B = torch.Tensor(config['batchSize'], config['output_nc'], config['size'], config['size'])
+        self.target_real = Variable(torch.Tensor(1,1).fill_(1.0), requires_grad=False)
+        self.target_fake = Variable(torch.Tensor(1,1).fill_(0.0), requires_grad=False)
 
         self.fake_A_buffer = ReplayBuffer()
         self.fake_B_buffer = ReplayBuffer()
@@ -59,33 +57,47 @@ class Cyc_Trainer():
         #Dataset loader
         level = config['noise_level']  # set noise level
         
-        transforms_1 = [ToPILImage(),
-                   RandomAffine(degrees=level,translate=[0.02*level, 0.02*level],scale=[1-0.02*level, 1+0.02*level],fillcolor=-1),
-                   ToTensor(),
-                   Resize(size_tuple = (config['size'], config['size']))]
+        transforms_1 = [
+            ToPILImage(),
+            RandomAffine(degrees=level,translate=[0.02*level, 0.02*level],scale=[1-0.02*level, 1+0.02*level]),
+            #Resize(size_tuple=(config['size'], config['size'])),
+            ToTensor(),
+            Normalize(mean=(0.5,), std=(0.5,)),
+            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
+        ]
     
-        transforms_2 = [ToPILImage(),
-                   RandomAffine(degrees=1,translate=[0.02, 0.02],scale=[0.98, 1.02],fillcolor=-1),
-                   ToTensor(),
-                   Resize(size_tuple = (config['size'], config['size']))]
+        transforms_2 = [
+            ToPILImage(),
+            RandomAffine(degrees=1,translate=[0.02, 0.02],scale=[0.98, 1.02]),
+            #Resize(size_tuple=(config['size'], config['size'])),
+            ToTensor(),
+            Normalize(mean=(0.5,), std=(0.5,)),
+            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
+        ]
 
         self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False,),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
 
         val_transforms = [ToTensor(),
-                          Resize(size_tuple = (config['size'], config['size']))]
+                          Resize(size = (config['size'], config['size']))]
         
         self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_ =val_transforms, unaligned=False),
                                 batch_size=config['batchSize'], shuffle=False, num_workers=config['n_cpu'])
 
  
        # Loss plot
-        self.logger = Logger(config['name'],config['port'],config['n_epochs'], len(self.dataloader))       
+        self.logger = Logger(config['n_epochs'], len(self.dataloader))
         
     def train(self):
         ###### Training ######
+        start_epoch = self.config['epoch']
+        steps_per_epoch = len(self.dataloader)
         for epoch in range(self.config['epoch'], self.config['n_epochs']):
             for i, batch in enumerate(self.dataloader):
+                global_step = (epoch - start_epoch) * steps_per_epoch + i
+                if torch.cuda.is_available():
+                    batch['A'] = batch['A'].cuda()
+                    batch['B'] = batch['B'].cuda()
                 # Set model input
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
@@ -271,31 +283,55 @@ class Cyc_Trainer():
                         ###################################
 
 
-                self.logger.log({'loss_D_B': loss_D_B,'SR_loss':SR_loss},
-                       images={'real_A': real_A, 'real_B': real_B, 'fake_B': fake_B})#,'SR':SysRegist_A2B
+                self.logger.log(losses={'loss_D_B': loss_D_B, 'SR_loss': SR_loss},
+                                iteration=global_step,
+                                )
 
     #         # Save models checkpoints
             if not os.path.exists(self.config["save_root"]):
                 os.makedirs(self.config["save_root"])
-            torch.save(self.netG_A2B.state_dict(), self.config['save_root'] + 'netG_A2B.pth')
-            #torch.save(self.R_A.state_dict(), self.config['save_root'] + 'Regist.pth')
-            #torch.save(netD_A.state_dict(), 'output/netD_A_3D.pth')
-            #torch.save(netD_B.state_dict(), 'output/netD_B_3D.pth')
-            
-            
+            ckpt_path = self.config['save_root'] + 'netG_A2B.pth'
+            torch.save(self.netG_A2B.state_dict(), ckpt_path)
+            if wandb.run is not None:
+                wandb.save(ckpt_path, base_path=self.config['save_root'], policy='now')
+
             #############val###############
+            val_step = (epoch - start_epoch + 1) * steps_per_epoch
             with torch.no_grad():
                 MAE = 0
                 num = 0
+                val_images = {'real_A': [], 'real_B': [], 'fake_B': []}
                 for i, batch in enumerate(self.val_data):
-                    real_A = Variable(self.input_A.copy_(batch['A']))
-                    real_B = Variable(self.input_B.copy_(batch['B'])).detach().cpu().numpy().squeeze()
-                    fake_B = self.netG_A2B(real_A).detach().cpu().numpy().squeeze()
-                    mae = self.MAE(fake_B,real_B)
+                    if torch.cuda.is_available():
+                        batch['A'] = batch['A'].cuda()
+                        batch['B'] = batch['B'].cuda()
+                    real_A_t = Variable(self.input_A.copy_(batch['A']))
+                    real_B_t = Variable(self.input_B.copy_(batch['B']))
+                    fake_B_t = self.netG_A2B(real_A_t)
+
+                    real_B = real_B_t.detach().cpu().numpy().squeeze()
+                    fake_B = fake_B_t.detach().cpu().numpy().squeeze()
+                    mae = self.MAE(fake_B, real_B)
                     MAE += mae
                     num += 1
 
-                print ('Val MAE:',MAE/num)
+                    val_images['real_A'].append(real_A_t.detach().cpu())
+                    val_images['real_B'].append(real_B_t.detach().cpu())
+                    val_images['fake_B'].append(fake_B_t.detach().cpu())
+
+                val_mae = MAE / num
+                print('Val MAE:', val_mae)
+
+                if wandb.run is not None:
+                    log_dict = {'val/MAE': val_mae, 'epoch': epoch}
+                    for name, tensors in val_images.items():
+                        imgs = []
+                        for t in tensors:
+                            for sample_idx in range(t.shape[0]):
+                                arr = (((t[sample_idx] + 1) / 2) * 255).numpy().astype('uint8')
+                                imgs.append(wandb.Image(arr))
+                        log_dict[f'val/{name}'] = imgs
+                    wandb.log(log_dict, step=val_step)
                 
                     
                          

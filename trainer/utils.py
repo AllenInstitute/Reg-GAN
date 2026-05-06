@@ -5,9 +5,10 @@ import sys
 import yaml
 from torch.autograd import Variable
 import torch
-from visdom import Visdom
 import torch.nn.functional as F
 import numpy as np
+import wandb
+
 class Resize():
     def __init__(self, size_tuple, use_cv = True):
         self.size_tuple = size_tuple
@@ -28,10 +29,6 @@ class Resize():
         tensor = tensor.squeeze(0)
  
         return tensor#1, 64, 128, 128
-class ToTensor():
-    def __call__(self, tensor):
-        tensor = np.expand_dims(tensor, 0)
-        return torch.from_numpy(tensor)
 
 def tensor2image(tensor):
     image = (127.5*(tensor.cpu().float().numpy()))+127.5
@@ -46,8 +43,7 @@ def tensor2image(tensor):
 
 
 class Logger():
-    def __init__(self, env_name ,ports, n_epochs, batches_epoch):
-        self.viz = Visdom(port= ports,env = env_name)
+    def __init__(self, n_epochs, batches_epoch):
         self.n_epochs = n_epochs
         self.batches_epoch = batches_epoch
         self.epoch = 1
@@ -58,48 +54,46 @@ class Logger():
         self.loss_windows = {}
         self.image_windows = {}
 
-    def log(self, losses=None, images=None):
+    def log(self, iteration, losses=None, images=None):
         self.mean_period += (time.time() - self.prev_time)
         self.prev_time = time.time()
 
         sys.stdout.write(
             '\rEpoch %03d/%03d [%04d/%04d] -- ' % (self.epoch, self.n_epochs, self.batch, self.batches_epoch))
 
+        wandb_losses = {}
         for i, loss_name in enumerate(losses.keys()):
+            loss_val = losses[loss_name].item()
+            wandb_losses[f'train/{loss_name}'] = loss_val
             if loss_name not in self.losses:
-                self.losses[loss_name] = losses[loss_name].item()
+                self.losses[loss_name] = loss_val
             else:
-                self.losses[loss_name] += losses[loss_name].item()
+                self.losses[loss_name] += loss_val
 
             if (i + 1) == len(losses.keys()):
                 sys.stdout.write('%s: %.4f -- ' % (loss_name, self.losses[loss_name] / self.batch))
             else:
                 sys.stdout.write('%s: %.4f | ' % (loss_name, self.losses[loss_name] / self.batch))
 
+        if wandb.run is not None:
+            wandb.log(wandb_losses, step=iteration)
+
         batches_done = self.batches_epoch * (self.epoch - 1) + self.batch
         batches_left = self.batches_epoch * (self.n_epochs - self.epoch) + self.batches_epoch - self.batch
         sys.stdout.write('ETA: %s' % (datetime.timedelta(seconds=batches_left * self.mean_period / batches_done)))
-
-        # Draw images
-        for image_name, tensor in images.items():
-            if image_name not in self.image_windows:
-                self.image_windows[image_name] = self.viz.image(tensor2image(tensor.data), opts={'title': image_name})
-            else:
-                self.viz.image(tensor2image(tensor.data), win=self.image_windows[image_name],
-                               opts={'title': image_name})
 
         # End of epoch
         if (self.batch % self.batches_epoch) == 0:
             # Plot losses
             for loss_name, loss in self.losses.items():
-                if loss_name not in self.loss_windows:
-                    self.loss_windows[loss_name] = self.viz.line(X=np.array([self.epoch]),
-                                                                 Y=np.array([loss / self.batch]),
-                                                                 opts={'xlabel': 'epochs', 'ylabel': loss_name,
-                                                                       'title': loss_name})
-                else:
-                    self.viz.line(X=np.array([self.epoch]), Y=np.array([loss / self.batch]),
-                                  win=self.loss_windows[loss_name], update='append')
+                # if loss_name not in self.loss_windows:
+                #     self.loss_windows[loss_name] = self.viz.line(X=np.array([self.epoch]),
+                #                                                  Y=np.array([loss / self.batch]),
+                #                                                  opts={'xlabel': 'epochs', 'ylabel': loss_name,
+                #                                                        'title': loss_name})
+                # else:
+                #     self.viz.line(X=np.array([self.epoch]), Y=np.array([loss / self.batch]),
+                #                   win=self.loss_windows[loss_name], update='append')
                 # Reset losses for next epoch
                 self.losses[loss_name] = 0.0
 
@@ -166,3 +160,19 @@ def smooothing_loss(y_pred):
     d = torch.mean(dx) + torch.mean(dy)
     grad = d 
     return d
+
+def pad_to_size(x, size, fill=-1):
+    _, h, w = x.shape
+
+    pad_h = max(size - h, 0)
+    pad_w = max(size - w, 0)
+
+    pad_top = pad_h // 2
+    pad_bottom = pad_h - pad_top
+
+    pad_left = pad_w // 2
+    pad_right = pad_w - pad_left
+
+    padding = [pad_left, pad_right, pad_top, pad_bottom]
+
+    return F.pad(x, padding, value=fill)

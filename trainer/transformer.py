@@ -19,7 +19,9 @@ class Transformer_2D(nn.Module):
         grids = torch.meshgrid(vectors)
         grid = torch.stack(grids)
         grid = grid.to(torch.float32)
-        grid = grid.repeat(b,1,1,1).cuda()
+        grid = grid.repeat(b,1,1,1)
+        if torch.cuda.is_available():
+            grid = grid.cuda()
         new_locs = grid+flow
         shape = flow.shape[2:]
         for i in range(len(shape)):

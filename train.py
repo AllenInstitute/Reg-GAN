@@ -1,15 +1,17 @@
-#!/usr/bin/python3
-
 import argparse
-import os
-from trainer import Cyc_Trainer,Nice_Trainer,P2p_Trainer,Munit_Trainer,Unit_Trainer
-import yaml
+from contextlib import nullcontext
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+import wandb
+
+import torch.cuda
+from yaml import CLoader
+
+from trainer import Cyc_Trainer
+import yaml
 
 def get_config(config):
     with open(config, 'r') as stream:
-        return yaml.load(stream)
+        return yaml.load(stream, Loader=CLoader)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,18 +21,23 @@ def main():
     
     if config['name'] == 'CycleGan':
         trainer = Cyc_Trainer(config)
-    elif config['name'] == 'Munit':
-        trainer = Munit_Trainer(config)
-    elif config['name'] == 'Unit':
-        trainer = Unit_Trainer(config)
-    elif config['name'] == 'NiceGAN':
-        trainer = Nice_Trainer(config)
-    elif config['name'] == 'U-gat':
-        trainer = Ugat_Trainer(config)
-    elif config['name'] == 'P2p':
-        trainer = P2p_Trainer(config)
+    else:
+        raise ValueError(f'{config["name"]} not supported')
 
-    trainer.train()
+    if torch.cuda.is_available():
+        trainer = trainer.cuda()
+
+    if config['use_wandb']:
+        wandb_run = wandb.init(
+            project=config['wandb_project'],
+            entity=config['wandb_entity'],
+            config=config
+        )
+    else:
+        wandb_run = nullcontext()
+
+    with wandb_run:
+        trainer.train()
     
     
 

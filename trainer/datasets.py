@@ -2,6 +2,7 @@ import glob
 import random
 import os
 import numpy as np
+import tifffile
 from torch.utils.data import Dataset
 from PIL import Image
 import torchvision.transforms as transforms
@@ -21,20 +22,25 @@ class ImageDataset(Dataset):
         self.noise_level =noise_level
         
     def __getitem__(self, index):
+        with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
+            img_a = tif.pages[0].asarray()
+        with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
+            img_b = tif.pages[0].asarray()
+
         if self.noise_level == 0:
             # if noise =0, A and B make same transform
             seed = np.random.randint(2147483647) # make a seed with numpy generator 
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
-            item_A = self.transform2(np.load(self.files_A[index % len(self.files_A)]).astype(np.float32))
+            item_A = self.transform2(img=img_a)
 
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
-            item_B = self.transform2(np.load(self.files_B[index % len(self.files_B)]).astype(np.float32))
+            item_B = self.transform2(img=img_b)
         else:
             # if noise !=0, A and B make different transform
-            item_A = self.transform1(np.load(self.files_A[index % len(self.files_A)]).astype(np.float32))
-            item_B = self.transform1(np.load(self.files_B[index % len(self.files_B)]).astype(np.float32))
+            item_A = self.transform1(img=img_a)
+            item_B = self.transform1(img=img_b)
             
             
             
@@ -51,11 +57,16 @@ class ValDataset(Dataset):
         self.files_B = sorted(glob.glob("%s/B/*" % root))
         
     def __getitem__(self, index):
-        item_A = self.transform(np.load(self.files_A[index % len(self.files_A)]).astype(np.float32))
+        with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
+            img_a = tif.pages[0].asarray()
+        with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
+            img_b = tif.pages[0].asarray()
+
+        item_A = self.transform(img=img_a)
         if self.unaligned:
-            item_B = self.transform(np.load(self.files_B[random.randint(0, len(self.files_B) - 1)]))
+            raise NotImplemented
         else:
-            item_B = self.transform(np.load(self.files_B[index % len(self.files_B)]).astype(np.float32))
+            item_B = self.transform(img=img_b)
         return {'A': item_A, 'B': item_B}
     def __len__(self):
         return max(len(self.files_A), len(self.files_B))
