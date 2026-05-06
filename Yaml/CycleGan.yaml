@@ -2,10 +2,10 @@
 name: CycleGan
 bidirect: False #Unidirectional or bidirectional
 regist: True    # With or without registration network
-noise_level: 0  #  noise level
+noise_level: 1  #  noise level
 port: 6019   #  port parameters
-save_root: './output/Cyc/NC+R/'
-image_save: './output/Cyc/NC+R/img/'
+save_root: '/results/Cyc/NC+R/'
+image_save: '/results/Cyc/NC+R/img/'
 
 # lamda weight
 Adv_lamda: 1
@@ -17,15 +17,15 @@ Smooth_lamda: 10
 epoch: 0        # starting epoch
 n_epochs: 80       # How often do you want to display output images during training
 batchSize: 1               # size of the batches
-dataroot: '/Users/adam.amster/Reg-GAN/test-data/'     # root directory of the dataset
-val_dataroot: '/Users/adam.amster/Reg-GAN/test-data/'
+dataroot: '/results/data/train'     # root directory of the dataset
+val_dataroot: '/results/data/val'
 lr: 0.0001                   # initial learning rate
 decay_epoch: 20            # epoch to start linearly decaying the learning rate to 0
 size: 512                # size of the data crop
 input_nc: 1         
 output_nc: 1                  
 cuda: True                
-n_cpu: 1
+n_cpu: 16
 
 use_wandb: true
 wandb_project: reg-gan-FISH
