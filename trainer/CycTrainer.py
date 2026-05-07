@@ -22,39 +22,48 @@ class Cyc_Trainer:
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         ## def networks
-        self.netG_A2B = Generator(config['input_nc'], config['output_nc'])
-        self.netD_B = Discriminator(config['input_nc'])
-        self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'], betas=(0.5, 0.999))
-        
+        self.netG_A2B = Generator(config['input_nc'], config['output_nc']).to(self.device)
+        self.netD_B = Discriminator(config['input_nc']).to(self.device)
+        self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'],
+                                              betas=(0.5, 0.999))
+
         if config['regist']:
-            self.R_A = Reg(config['size'], config['size'],config['input_nc'],config['input_nc'])
-            self.spatial_transform = Transformer_2D()
-            self.optimizer_R_A = torch.optim.Adam(self.R_A.parameters(), lr=config['lr'], betas=(0.5, 0.999))
+            self.R_A = Reg(config['size'], config['size'], config['input_nc'],
+                           config['input_nc']).to(self.device)
+            self.spatial_transform = Transformer_2D().to(self.device)
+            self.optimizer_R_A = torch.optim.Adam(self.R_A.parameters(), lr=config['lr'],
+                                                  betas=(0.5, 0.999))
         if config['bidirect']:
-            self.netG_B2A = Generator(config['input_nc'], config['output_nc'])
-            self.netD_A = Discriminator(config['input_nc'])
-            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters()),lr=config['lr'], betas=(0.5, 0.999))
-            self.optimizer_D_A = torch.optim.Adam(self.netD_A.parameters(), lr=config['lr'], betas=(0.5, 0.999))
+            self.netG_B2A = Generator(config['input_nc'], config['output_nc']).to(self.device)
+            self.netD_A = Discriminator(config['input_nc']).to(self.device)
+            self.optimizer_G = torch.optim.Adam(
+                itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters()),
+                lr=config['lr'], betas=(0.5, 0.999))
+            self.optimizer_D_A = torch.optim.Adam(self.netD_A.parameters(), lr=config['lr'],
+                                                  betas=(0.5, 0.999))
 
         else:
-            self.optimizer_G = torch.optim.Adam(self.netG_A2B.parameters(), lr=config['lr'], betas=(0.5, 0.999))
-            
+            self.optimizer_G = torch.optim.Adam(self.netG_A2B.parameters(), lr=config['lr'],
+                                                betas=(0.5, 0.999))
 
         # Lossess
         self.MSE_loss = torch.nn.MSELoss()
         self.L1_loss = torch.nn.L1Loss()
 
         # Inputs & targets memory allocation
-        self.input_A = torch.Tensor(config['batchSize'], config['input_nc'], config['size'], config['size'])
-        self.input_B = torch.Tensor(config['batchSize'], config['output_nc'], config['size'], config['size'])
-        self.target_real = Variable(torch.Tensor(1,1).fill_(1.0), requires_grad=False)
-        self.target_fake = Variable(torch.Tensor(1,1).fill_(0.0), requires_grad=False)
+        self.input_A = torch.empty(config['batchSize'], config['input_nc'], config['size'],
+                                   config['size'], device=self.device)
+        self.input_B = torch.empty(config['batchSize'], config['output_nc'], config['size'],
+                                   config['size'], device=self.device)
+        self.target_real = Variable(torch.ones(1, 1, device=self.device), requires_grad=False)
+        self.target_fake = Variable(torch.zeros(1, 1, device=self.device), requires_grad=False)
 
         self.fake_A_buffer = ReplayBuffer()
         self.fake_B_buffer = ReplayBuffer()
 
-        #Dataset loader
+        # Dataset loader
         level = config['noise_level']  # set noise level
         
         transforms_1 = [
@@ -95,9 +104,8 @@ class Cyc_Trainer:
         for epoch in range(self.config['epoch'], self.config['n_epochs']):
             for i, batch in enumerate(self.dataloader):
                 global_step = (epoch - start_epoch) * steps_per_epoch + i
-                if torch.cuda.is_available():
-                    batch['A'] = batch['A'].cuda()
-                    batch['B'] = batch['B'].cuda()
+                batch['A'] = batch['A'].to(self.device)
+                batch['B'] = batch['B'].to(self.device)
                 # Set model input
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
@@ -302,9 +310,8 @@ class Cyc_Trainer:
                 num = 0
                 val_images = {'real_A': [], 'real_B': [], 'fake_B': []}
                 for i, batch in enumerate(self.val_data):
-                    if torch.cuda.is_available():
-                        batch['A'] = batch['A'].cuda()
-                        batch['B'] = batch['B'].cuda()
+                    batch['A'] = batch['A'].to(self.device)
+                    batch['B'] = batch['B'].to(self.device)
                     real_A_t = Variable(self.input_A.copy_(batch['A']))
                     real_B_t = Variable(self.input_B.copy_(batch['B']))
                     fake_B_t = self.netG_A2B(real_A_t)

@@ -24,9 +24,6 @@ def main():
     else:
         raise ValueError(f'{config["name"]} not supported')
 
-    if torch.cuda.is_available():
-        trainer = trainer.cuda()
-
     if config['use_wandb']:
         wandb_run = wandb.init(
             project=config['wandb_project'],
