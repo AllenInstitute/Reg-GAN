@@ -15,6 +15,7 @@ from .reg import Reg
 from torchvision.transforms import RandomAffine,ToPILImage, Normalize, ToTensor, Resize, Lambda
 from .transformer import Transformer_2D
 from skimage import measure
+from skimage.metrics import normalized_mutual_information
 import numpy as np
 import cv2
 
@@ -306,7 +307,7 @@ class Cyc_Trainer:
             #############val###############
             val_step = (epoch - start_epoch + 1) * steps_per_epoch
             with torch.no_grad():
-                MAE = 0
+                NMI_sum = 0
                 num = 0
                 val_images = {'real_A': [], 'real_B': [], 'fake_B': []}
                 for i, batch in enumerate(self.val_data):
@@ -318,26 +319,26 @@ class Cyc_Trainer:
 
                     real_B = real_B_t.detach().cpu().numpy().squeeze()
                     fake_B = fake_B_t.detach().cpu().numpy().squeeze()
-                    mae = self.MAE(fake_B, real_B)
-                    MAE += mae
+                    nmi = normalized_mutual_information(real_B, fake_B)
+                    NMI_sum += nmi
                     num += 1
 
                     val_images['real_A'].append(real_A_t.detach().cpu())
                     val_images['real_B'].append(real_B_t.detach().cpu())
                     val_images['fake_B'].append(fake_B_t.detach().cpu())
 
-                val_mae = MAE / num
-                print('Val MAE:', val_mae)
+                val_nmi = NMI_sum / num
+                print('Val NMI:', val_nmi)
 
                 if wandb.run is not None:
-                    log_dict = {'val/MAE': val_mae, 'epoch': epoch}
-                    for name, tensors in val_images.items():
+                    log_dict = {'val/NMI': val_nmi, 'epoch': epoch}
+                    for i, (name, tensors) in enumerate(val_images.items()):
                         imgs = []
                         for t in tensors:
                             for sample_idx in range(t.shape[0]):
                                 arr = (((t[sample_idx] + 1) / 2) * 255).numpy().astype('uint8')
                                 imgs.append(wandb.Image(arr))
-                        log_dict[f'val/{name}'] = imgs
+                        log_dict[f'val/{val_step}/{name}_{i}'] = imgs
                     wandb.log(log_dict, step=val_step)
                 
                     
@@ -380,8 +381,7 @@ class Cyc_Trainer:
     def MAE(self,fake,real):
         x,y = np.where(real!= -1)  # Exclude background
         mae = np.abs(fake[x,y]-real[x,y]).mean()
-        return mae/2     #from (-1,1) normaliz  to (0,1)
-            
+        return mae/2     #from (-1,1) normaliz  to (0,1)            
 
     def save_deformation(self,defms,root):
         heatmapshow = None
