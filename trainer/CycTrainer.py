@@ -60,19 +60,19 @@ class Cyc_Trainer:
         transforms_1 = [
             ToPILImage(),
             RandomAffine(degrees=level,translate=[0.02*level, 0.02*level],scale=[1-0.02*level, 1+0.02*level]),
-            #Resize(size_tuple=(config['size'], config['size'])),
             ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
             Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
+            Resize(size=(config['size'], config['size']))
         ]
     
         transforms_2 = [
             ToPILImage(),
             RandomAffine(degrees=1,translate=[0.02, 0.02],scale=[0.98, 1.02]),
-            #Resize(size_tuple=(config['size'], config['size'])),
             ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
             Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
+            Resize(size=(config['size'], config['size']))
         ]
 
         self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False,),
