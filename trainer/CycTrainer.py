@@ -332,13 +332,13 @@ class Cyc_Trainer:
 
                 if wandb.run is not None:
                     log_dict = {'val/NMI': val_nmi, 'epoch': epoch}
-                    for i, (name, tensors) in enumerate(val_images.items()):
-                        imgs = []
+                    for name, tensors in val_images.items():
+                        sample_idx = 0
                         for t in tensors:
-                            for sample_idx in range(t.shape[0]):
-                                arr = (((t[sample_idx] + 1) / 2) * 255).numpy().astype('uint8')
-                                imgs.append(wandb.Image(arr))
-                        log_dict[f'val/{val_step}/{name}_{i}'] = imgs
+                            for b in range(t.shape[0]):
+                                arr = (((t[b] + 1) / 2) * 255).numpy().astype('uint8')
+                                log_dict[f'val/{val_step}/{name}_{sample_idx}'] = wandb.Image(arr)
+                                sample_idx += 1
                     wandb.log(log_dict, step=val_step)
                 
                     
