@@ -12,7 +12,7 @@ from Model.CycleGan import *
 from .utils import smooothing_loss
 from .utils import Logger
 from .reg import Reg
-from torchvision.transforms import RandomAffine,ToPILImage, Normalize, ToTensor, Resize, Lambda
+from torchvision.transforms import RandomAffine,ToPILImage, Normalize, ToTensor, Resize, Lambda, RandomCrop
 from .transformer import Transformer_2D
 from skimage import measure
 from skimage.metrics import normalized_mutual_information
@@ -73,7 +73,7 @@ class Cyc_Trainer:
             ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
             Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            Resize(size=(config['size'], config['size']))
+            RandomCrop(size=(config['size'], config['size']))
         ]
     
         transforms_2 = [
@@ -82,7 +82,7 @@ class Cyc_Trainer:
             ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
             Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            Resize(size=(config['size'], config['size']))
+            RandomCrop(size=(config['size'], config['size']))
         ]
 
         self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False,),
@@ -92,7 +92,7 @@ class Cyc_Trainer:
             ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
             Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            Resize(size=(config['size'], config['size']))
+            RandomCrop(size=(config['size'], config['size']))
         ]
         
         self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_=val_transforms, unaligned=False),
