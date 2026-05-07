@@ -88,10 +88,14 @@ class Cyc_Trainer:
         self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False,),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
 
-        val_transforms = [ToTensor(),
-                          Resize(size = (config['size'], config['size']))]
+        val_transforms = [
+            ToTensor(),
+            Normalize(mean=(0.5,), std=(0.5,)),
+            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
+            Resize(size=(config['size'], config['size']))
+        ]
         
-        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_ =val_transforms, unaligned=False),
+        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_=val_transforms, unaligned=False),
                                 batch_size=config['batchSize'], shuffle=False, num_workers=config['n_cpu'])
 
  
@@ -337,7 +341,7 @@ class Cyc_Trainer:
                         for t in tensors:
                             for b in range(t.shape[0]):
                                 arr = (((t[b] + 1) / 2) * 255).numpy().astype('uint8')
-                                log_dict[f'val/{val_step}/{name}_{sample_idx}'] = wandb.Image(arr)
+                                log_dict[f'val/{val_step}/{sample_idx}/{name}'] = wandb.Image(arr)
                                 sample_idx += 1
                     wandb.log(log_dict, step=val_step)
                 
