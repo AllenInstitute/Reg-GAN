@@ -114,6 +114,7 @@ class Cyc_Trainer:
                 # Set model input
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
+                SR_loss = None
                 if self.config['bidirect']:   # C dir
                     if self.config['regist']:    #C + R
                         self.optimizer_R_A.zero_grad()
@@ -296,7 +297,10 @@ class Cyc_Trainer:
                         ###################################
 
 
-                self.logger.log(losses={'loss_D_B': loss_D_B, 'SR_loss': SR_loss},
+                losses = {'loss_D_B': loss_D_B}
+                if SR_loss is not None:
+                    losses['SR_loss'] = SR_loss
+                self.logger.log(losses=losses,
                                 iteration=global_step,
                                 )
 
