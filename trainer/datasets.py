@@ -6,7 +6,6 @@ from scipy import ndimage
 from torch.utils.data import Dataset
 from albumentations import Compose
 import torch
-from transformers import SamModel, SamProcessor
 
 
 def _get_mask(image: np.ndarray):
@@ -98,11 +97,6 @@ class ValDataset(Dataset):
         self.files_A = sorted(glob.glob("%s/A/*" % root))
         self.files_B = sorted(glob.glob("%s/B/*" % root))
 
-        model = SamModel.from_pretrained("facebook/sam-vit-base")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
-        self._sam_model = model
-        self._sam_processor = processor
-        
     def __getitem__(self, index):
         with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
             img_a = tif.pages[0].asarray()
