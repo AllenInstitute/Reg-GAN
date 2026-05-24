@@ -29,7 +29,7 @@ def _get_mask(image: np.ndarray):
         raise ValueError(f"Expected 2D image for mask generation, got shape {array.shape}")
 
     if array.max() == array.min():
-        return np.zeros_like(array, dtype=bool)
+        return np.zeros_like(array, dtype='uint8')
 
     threshold = filters.threshold_otsu(array) * MASK_OTSU_THRESHOLD_SCALE
     mask = array > threshold
