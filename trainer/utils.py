@@ -161,8 +161,8 @@ def smooothing_loss(y_pred):
     grad = d 
     return d
 
-def pad_to_size(x, size, fill=-1):
-    _, h, w = x.shape
+def pad_to_size(x, size, fill=-1, **kwargs):
+    h, w = x.shape
 
     pad_h = max(size - h, 0)
     pad_w = max(size - w, 0)
@@ -173,6 +173,6 @@ def pad_to_size(x, size, fill=-1):
     pad_left = pad_w // 2
     pad_right = pad_w - pad_left
 
-    padding = [pad_left, pad_right, pad_top, pad_bottom]
+    padding = ((pad_top, pad_bottom), (pad_left, pad_right))
 
-    return F.pad(x, padding, value=fill)
+    return np.pad(x, pad_width=padding, mode="constant", constant_values=fill)

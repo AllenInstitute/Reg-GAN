@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "albumentations>=2.0.8",
     "loguru>=0.7.3",
     "matplotlib>=3.10.9",
     "opencv-python-headless>=4.13.0.92",
@@ -12,5 +13,6 @@ dependencies = [
     "scikit-image>=0.26.0",
     "torch>=2.11.0",
     "torchvision>=0.26.0",
+    "transformers>=5.9.0",
     "wandb>=0.26.1",
 ]

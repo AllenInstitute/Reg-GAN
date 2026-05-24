@@ -1,17 +1,16 @@
 #####
 name: CycleGan
-bidirect: False #Unidirectional or bidirectional
-regist: True    # With or without registration network
+bidirect: True #Unidirectional or bidirectional
+regist: False    # With or without registration network
 noise_level: 1  #  noise level
 port: 6019   #  port parameters
-save_root: '/tmp/Cyc/NC+R/'
-image_save: '/tmp/Cyc/NC+R/img/'
+save_root: '/tmp/Cyc/C/'
+image_save: '/tmp/Cyc/C/img/'
 
 # lamda weight
 Adv_lamda: 1
 Cyc_lamda: 10
-Corr_lamda: 20
-Smooth_lamda: 10
+Mask_lamda: 1
 
 
 epoch: 0        # starting epoch
@@ -19,7 +18,7 @@ n_epochs: 80       # How often do you want to display output images during train
 batchSize: 1               # size of the batches
 dataroot: '/Users/adam.amster/Reg-GAN/test-data'     # root directory of the dataset
 val_dataroot: '/Users/adam.amster/Reg-GAN/test-data'
-lr: 0.0001                   # initial learning rate
+lr: 0.0002                   # initial learning rate
 decay_epoch: 20            # epoch to start linearly decaying the learning rate to 0
 size: 512                # size of the data crop
 input_nc: 1

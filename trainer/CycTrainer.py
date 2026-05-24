@@ -1,18 +1,17 @@
 import itertools
-from functools import partial
 
 import wandb
 import torch.cuda
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 import os
-from .utils import ReplayBuffer, pad_to_size
+from .utils import ReplayBuffer
 from .datasets import ImageDataset,ValDataset
 from Model.CycleGan import *
 from .utils import smooothing_loss
 from .utils import Logger
 from .reg import Reg
-from torchvision.transforms import RandomAffine,ToPILImage, Normalize, ToTensor, Resize, Lambda, RandomCrop
+from albumentations import Affine, ToTensorV2, Normalize, PadIfNeeded, RandomCrop, SquareSymmetry
 from .transformer import Transformer_2D
 from skimage import measure
 from skimage.metrics import normalized_mutual_information
@@ -52,6 +51,7 @@ class Cyc_Trainer:
         # Lossess
         self.MSE_loss = torch.nn.MSELoss()
         self.L1_loss = torch.nn.L1Loss()
+        self.BCE_loss = torch.nn.BCEWithLogitsLoss()
 
         # Inputs & targets memory allocation
         self.input_A = torch.empty(config['batchSize'], config['input_nc'], config['size'],
@@ -68,31 +68,32 @@ class Cyc_Trainer:
         level = config['noise_level']  # set noise level
         
         transforms_1 = [
-            ToPILImage(),
-            RandomAffine(degrees=level,translate=[0.02*level, 0.02*level],scale=[1-0.02*level, 1+0.02*level]),
-            ToTensor(),
+            Affine(rotate=level,translate_percent=(0.02, 0.02),scale=(0.98, 1.02)),
+            SquareSymmetry(),
             Normalize(mean=(0.5,), std=(0.5,)),
-            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            RandomCrop(size=(config['size'], config['size']))
-        ]
-    
-        transforms_2 = [
-            ToPILImage(),
-            RandomAffine(degrees=1,translate=[0.02, 0.02],scale=[0.98, 1.02]),
-            ToTensor(),
-            Normalize(mean=(0.5,), std=(0.5,)),
-            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            RandomCrop(size=(config['size'], config['size']))
+            PadIfNeeded(
+                min_height=config['size'],
+                min_width=config['size'],
+                fill=-1,
+                fill_mask=0,
+            ),
+            RandomCrop(height=config['size'], width=config['size']),
+            ToTensorV2(),
         ]
 
-        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False,),
+        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_1, unaligned=False,),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
 
         val_transforms = [
-            ToTensor(),
             Normalize(mean=(0.5,), std=(0.5,)),
-            Lambda(partial(pad_to_size, size=config['size'], fill=-1)),
-            RandomCrop(size=(config['size'], config['size']))
+            PadIfNeeded(
+                min_height=config['size'],
+                min_width=config['size'],
+                fill=-1,
+                fill_mask=0,
+            ),
+            RandomCrop(height=config['size'], width=config['size']),
+            ToTensorV2(),
         ]
         
         self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_=val_transforms, unaligned=False),
@@ -115,6 +116,8 @@ class Cyc_Trainer:
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
                 SR_loss = None
+                loss_mask_A2B = None
+                loss_mask_B2A = None
                 if self.config['bidirect']:   # C dir
                     if self.config['regist']:    #C + R
                         self.optimizer_R_A.zero_grad()
@@ -184,14 +187,20 @@ class Cyc_Trainer:
                     
                     else: #only  dir:  C
                         self.optimizer_G.zero_grad()
+                        mask_A = batch['A_mask'].float().to(self.device)
+                        mask_B = batch['B_mask'].float().to(self.device)
                         # GAN loss
-                        fake_B = self.netG_A2B(real_A)
+                        fake_B, fake_B_mask_logits = self.netG_A2B(real_A, return_mask=True)
                         pred_fake = self.netD_B(fake_B)
                         loss_GAN_A2B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
 
-                        fake_A = self.netG_B2A(real_B)
+                        fake_A, fake_A_mask_logits = self.netG_B2A(real_B, return_mask=True)
                         pred_fake = self.netD_A(fake_A)
                         loss_GAN_B2A = self.config['Adv_lamda']*self.MSE_loss(pred_fake, self.target_real)
+
+                        mask_lamda = self.config.get('Mask_lamda', 1)
+                        loss_mask_A2B = mask_lamda * self.BCE_loss(fake_B_mask_logits, mask_A)
+                        loss_mask_B2A = mask_lamda * self.BCE_loss(fake_A_mask_logits, mask_B)
 
                         # Cycle loss
                         recovered_A = self.netG_B2A(fake_B)
@@ -201,7 +210,7 @@ class Cyc_Trainer:
                         loss_cycle_BAB = self.config['Cyc_lamda'] * self.L1_loss(recovered_B, real_B)
 
                         # Total loss
-                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB
+                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + loss_mask_A2B + loss_mask_B2A
                         loss_Total.backward()
                         self.optimizer_G.step()
 
@@ -300,6 +309,10 @@ class Cyc_Trainer:
                 losses = {'loss_D_B': loss_D_B}
                 if SR_loss is not None:
                     losses['SR_loss'] = SR_loss
+                if loss_mask_A2B is not None:
+                    losses['loss_mask_A2B'] = loss_mask_A2B
+                if loss_mask_B2A is not None:
+                    losses['loss_mask_B2A'] = loss_mask_B2A
                 self.logger.log(losses=losses,
                                 iteration=global_step,
                                 )

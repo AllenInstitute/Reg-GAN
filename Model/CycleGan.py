@@ -47,30 +47,38 @@ class Generator(nn.Module):
             model_body += [ResidualBlock(in_features)]
 
         # Upsampling
-        model_tail = []
+        model_upsample = []
         out_features = in_features // 2
         for _ in range(2):
-            model_tail += [nn.ConvTranspose2d(in_features, out_features, 3, stride=2, padding=1, output_padding=1),
-                           nn.InstanceNorm2d(out_features),
-                           nn.ReLU(inplace=True)]
+            model_upsample += [nn.ConvTranspose2d(in_features, out_features, 3, stride=2, padding=1, output_padding=1),
+                               nn.InstanceNorm2d(out_features),
+                               nn.ReLU(inplace=True)]
             in_features = out_features
             out_features = in_features // 2
 
         # Output layer
-        model_tail += [nn.ReflectionPad2d(3),
-                       nn.Conv2d(64, output_nc, 7),
-                       nn.Tanh()]
+        image_tail = [nn.ReflectionPad2d(3),
+                      nn.Conv2d(64, output_nc, 7),
+                      nn.Tanh()]
+        mask_tail = [nn.ReflectionPad2d(3),
+                     nn.Conv2d(64, 1, 7)]
 
         self.model_head = nn.Sequential(*model_head)
         self.model_body = nn.Sequential(*model_body)
-        self.model_tail = nn.Sequential(*model_tail)
+        self.model_upsample = nn.Sequential(*model_upsample)
+        self.image_tail = nn.Sequential(*image_tail)
+        self.mask_tail = nn.Sequential(*mask_tail)
 
-    def forward(self, x):
+    def forward(self, x, return_mask=False):
         x = self.model_head(x)
         x = self.model_body(x)
-        x = self.model_tail(x)
+        x = self.model_upsample(x)
+        image = self.image_tail(x)
 
-        return x
+        if return_mask:
+            return image, self.mask_tail(x)
+
+        return image
 
 
 class Discriminator(nn.Module):
