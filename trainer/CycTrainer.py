@@ -359,8 +359,7 @@ class Cyc_Trainer:
                             'real_A': real_A_cpu[b],
                             'real_B': real_B_cpu[b],
                             'fake_B': fake_B_cpu[b],
-                            'target_mask_B': target_mask_cpu[b],
-                            'pred_mask_B': pred_mask_cpu[b],
+                            'mask_error_B': Cyc_Trainer.mask_error_image(pred_mask_cpu[b], target_mask_cpu[b]),
                         })
 
                 val_nmi = NMI_sum / num
@@ -374,7 +373,9 @@ class Cyc_Trainer:
                     sample_indices = np.random.choice(len(val_images), sample_count, replace=False)
                     for sample_idx, val_idx in enumerate(sample_indices):
                         for name, tensor in val_images[val_idx].items():
-                            if 'mask' in name:
+                            if name == 'mask_error_B':
+                                arr = (tensor.permute(1, 2, 0) * 255).numpy().astype('uint8')
+                            elif 'mask' in name:
                                 arr = (tensor * 255).numpy().astype('uint8')
                             else:
                                 arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
@@ -429,6 +430,18 @@ class Cyc_Trainer:
         intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
         denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
         return ((2 * intersection + eps) / (denominator + eps)).mean()
+
+    @staticmethod
+    def mask_error_image(pred_mask, target_mask):
+        pred_mask = pred_mask.squeeze(0) > 0.5
+        target_mask = target_mask.squeeze(0) > 0.5
+        mask_error = torch.zeros(3, *target_mask.shape, dtype=torch.float32)
+
+        mask_error[1][pred_mask & target_mask] = 1.0
+        mask_error[0][pred_mask & ~target_mask] = 1.0
+        mask_error[2][~pred_mask & target_mask] = 1.0
+
+        return mask_error
 
     def save_deformation(self,defms,root):
         heatmapshow = None
