@@ -329,37 +329,49 @@ class Cyc_Trainer:
             val_step = (epoch - start_epoch + 1) * steps_per_epoch
             with torch.no_grad():
                 NMI_sum = 0
+                dice_sum = 0
                 num = 0
-                val_images = {'real_A': [], 'real_B': [], 'fake_B': []}
+                val_images = []
                 for i, batch in enumerate(self.val_data):
                     batch['A'] = batch['A'].to(self.device)
                     batch['B'] = batch['B'].to(self.device)
+                    mask_A = batch['A_mask'].float().to(self.device)
                     real_A_t = Variable(self.input_A.copy_(batch['A']))
                     real_B_t = Variable(self.input_B.copy_(batch['B']))
-                    fake_B_t = self.netG_A2B(real_A_t)
+                    fake_B_t, fake_B_mask_logits = self.netG_A2B(real_A_t, return_mask=True)
 
                     real_B = real_B_t.detach().cpu().numpy().squeeze()
                     fake_B = fake_B_t.detach().cpu().numpy().squeeze()
                     nmi = normalized_mutual_information(real_B, fake_B)
                     NMI_sum += nmi
+                    fake_B_mask = (torch.sigmoid(fake_B_mask_logits) > 0.5).float()
+                    dice = self.Dice(fake_B_mask, mask_A)
+                    dice_sum += dice.item()
                     num += 1
 
-                    val_images['real_A'].append(real_A_t.detach().cpu())
-                    val_images['real_B'].append(real_B_t.detach().cpu())
-                    val_images['fake_B'].append(fake_B_t.detach().cpu())
+                    real_A_cpu = real_A_t.detach().cpu()
+                    real_B_cpu = real_B_t.detach().cpu()
+                    fake_B_cpu = fake_B_t.detach().cpu()
+                    for b in range(real_A_cpu.shape[0]):
+                        val_images.append({
+                            'real_A': real_A_cpu[b],
+                            'real_B': real_B_cpu[b],
+                            'fake_B': fake_B_cpu[b],
+                        })
 
                 val_nmi = NMI_sum / num
+                val_dice = dice_sum / num
                 print('Val NMI:', val_nmi)
+                print('Val Dice_B:', val_dice)
 
                 if wandb.run is not None:
-                    log_dict = {'val/NMI': val_nmi, 'epoch': epoch}
-                    for name, tensors in val_images.items():
-                        sample_idx = 0
-                        for t in tensors:
-                            for b in range(t.shape[0]):
-                                arr = (((t[b] + 1) / 2) * 255).numpy().astype('uint8')
-                                log_dict[f'val/{val_step}/{sample_idx}/{name}'] = wandb.Image(arr)
-                                sample_idx += 1
+                    log_dict = {'val/NMI': val_nmi, 'val/Dice_B': val_dice, 'epoch': epoch}
+                    sample_count = min(5, len(val_images))
+                    sample_indices = np.random.choice(len(val_images), sample_count, replace=False)
+                    for sample_idx, val_idx in enumerate(sample_indices):
+                        for name, tensor in val_images[val_idx].items():
+                            arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
+                            log_dict[f'val/{val_step}/{sample_idx}/{name}'] = wandb.Image(arr)
                     wandb.log(log_dict, step=val_step)
                 
                     
@@ -403,6 +415,13 @@ class Cyc_Trainer:
         x,y = np.where(real!= -1)  # Exclude background
         mae = np.abs(fake[x,y]-real[x,y]).mean()
         return mae/2     #from (-1,1) normaliz  to (0,1)            
+
+    def Dice(self, pred_mask, target_mask, eps=1e-7):
+        pred_mask = pred_mask.float()
+        target_mask = target_mask.float()
+        intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
+        denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
+        return ((2 * intersection + eps) / (denominator + eps)).mean()
 
     def save_deformation(self,defms,root):
         heatmapshow = None
