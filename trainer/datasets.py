@@ -102,18 +102,6 @@ class ValDataset(Dataset):
         processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
         self._sam_model = model
         self._sam_processor = processor
-
-    def _get_mask(self, image: np.ndarray):
-        raw_image_3channel = np.stack([image, image, image], axis=-1)
-        input_boxes = [[[0, 0, image.shape[1], image.shape[0]]]]
-        inputs = self._sam_processor(raw_image_3channel, input_boxes=[input_boxes], return_tensors="pt")
-        with torch.no_grad():
-            outputs = self._sam_model(**inputs, multimask_output=False)
-        masks = self._sam_processor.image_processor.post_process_masks(outputs.pred_masks.cpu(),
-                                                             inputs["original_sizes"].cpu(),
-                                                             inputs["reshaped_input_sizes"].cpu())
-        mask = masks[0][0, 0].numpy().astype('uint8')
-        return mask
         
     def __getitem__(self, index):
         with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
@@ -121,8 +109,8 @@ class ValDataset(Dataset):
         with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = self._get_mask(image=img_a)
-        mask_b = self._get_mask(image=img_b)
+        mask_a = _get_mask(image=img_a)
+        mask_b = _get_mask(image=img_b)
 
         item_A = self.transform(image=img_a, mask=mask_a)
         if self.unaligned:

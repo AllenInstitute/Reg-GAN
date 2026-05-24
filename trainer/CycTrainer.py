@@ -352,11 +352,15 @@ class Cyc_Trainer:
                     real_A_cpu = real_A_t.detach().cpu()
                     real_B_cpu = real_B_t.detach().cpu()
                     fake_B_cpu = fake_B_t.detach().cpu()
+                    target_mask_cpu = mask_A.detach().cpu()
+                    pred_mask_cpu = fake_B_mask.detach().cpu()
                     for b in range(real_A_cpu.shape[0]):
                         val_images.append({
                             'real_A': real_A_cpu[b],
                             'real_B': real_B_cpu[b],
                             'fake_B': fake_B_cpu[b],
+                            'target_mask_B': target_mask_cpu[b],
+                            'pred_mask_B': pred_mask_cpu[b],
                         })
 
                 val_nmi = NMI_sum / num
@@ -370,7 +374,10 @@ class Cyc_Trainer:
                     sample_indices = np.random.choice(len(val_images), sample_count, replace=False)
                     for sample_idx, val_idx in enumerate(sample_indices):
                         for name, tensor in val_images[val_idx].items():
-                            arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
+                            if 'mask' in name:
+                                arr = (tensor * 255).numpy().astype('uint8')
+                            else:
+                                arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
                             log_dict[f'val/{val_step}/{sample_idx}/{name}'] = wandb.Image(arr)
                     wandb.log(log_dict, step=val_step)
                 
