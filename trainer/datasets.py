@@ -1,11 +1,45 @@
 import glob
 import numpy as np
 import tifffile
+from skimage import filters, morphology
+from scipy import ndimage
 from torch.utils.data import Dataset
 from albumentations import Compose
 import torch
 from transformers import SamModel, SamProcessor
 
+
+def _get_mask(image: np.ndarray):
+    MASK_OTSU_THRESHOLD_SCALE = 0.85
+    MASK_CLOSING_RADIUS = 17
+    MASK_OPENING_RADIUS = 1
+
+    def largest_component(mask: np.ndarray) -> np.ndarray:
+        labels, label_count = ndimage.label(mask)
+        if label_count == 0:
+            return np.zeros_like(mask, dtype=bool)
+
+        counts = np.bincount(labels.ravel())
+        counts[0] = 0
+        return labels == counts.argmax()
+
+    array = np.asarray(image)
+
+    if array.ndim != 2:
+        raise ValueError(f"Expected 2D image for mask generation, got shape {array.shape}")
+
+    if array.max() == array.min():
+        return np.zeros_like(array, dtype=bool)
+
+    threshold = filters.threshold_otsu(array) * MASK_OTSU_THRESHOLD_SCALE
+    mask = array > threshold
+
+    mask = ndimage.binary_closing(mask, structure=morphology.disk(MASK_CLOSING_RADIUS))
+    mask = ndimage.binary_fill_holes(mask)
+    mask = ndimage.binary_opening(mask, structure=morphology.disk(MASK_OPENING_RADIUS))
+    mask = largest_component(mask)
+
+    return mask.astype('uint8')
 
 class ImageDataset(Dataset):
     def __init__(self, root,noise_level,count = None,transforms_1=None,transforms_2=None, unaligned=False):
@@ -16,31 +50,14 @@ class ImageDataset(Dataset):
         self.unaligned = unaligned
         self.noise_level =noise_level
 
-        model = SamModel.from_pretrained("facebook/sam-vit-base")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
-        self._sam_model = model
-        self._sam_processor = processor
-
-    def _get_mask(self, image: np.ndarray):
-        raw_image_3channel = np.stack([image, image, image], axis=-1)
-        input_boxes = [[[0, 0, image.shape[1], image.shape[0]]]]
-        inputs = self._sam_processor(raw_image_3channel, input_boxes=[input_boxes], return_tensors="pt")
-        with torch.no_grad():
-            outputs = self._sam_model(**inputs, multimask_output=False)
-        masks = self._sam_processor.image_processor.post_process_masks(outputs.pred_masks.cpu(),
-                                                             inputs["original_sizes"].cpu(),
-                                                             inputs["reshaped_input_sizes"].cpu())
-        mask = masks[0][0, 0].numpy().astype('uint8')
-        return mask
-
     def __getitem__(self, index):
         with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
             img_a = tif.pages[0].asarray()
         with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = self._get_mask(image=img_a)
-        mask_b = self._get_mask(image=img_b)
+        mask_a = _get_mask(image=img_a)
+        mask_b = _get_mask(image=img_b)
 
         if self.noise_level == 0:
             # if noise =0, A and B make same transform

@@ -1,6 +1,6 @@
 #####
 name: CycleGan
-bidirect: False #Unidirectional or bidirectional
+bidirect: True #Unidirectional or bidirectional
 regist: False    # With or without registration network
 noise_level: 0  #  noise level
 port: 6019   #  port parameters
