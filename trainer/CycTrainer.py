@@ -69,7 +69,7 @@ class Cyc_Trainer:
         
         transforms_1 = [
             Affine(rotate=level,translate_percent=(0.02, 0.02),scale=(0.98, 1.02)),
-            SquareSymmetry(),
+            #SquareSymmetry(),
             Normalize(mean=(0.5,), std=(0.5,)),
             PadIfNeeded(
                 min_height=config['size'],
