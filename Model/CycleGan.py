@@ -47,38 +47,51 @@ class Generator(nn.Module):
             model_body += [ResidualBlock(in_features)]
 
         # Upsampling
-        model_upsample = []
+        model_tail = []
         out_features = in_features // 2
         for _ in range(2):
-            model_upsample += [nn.ConvTranspose2d(in_features, out_features, 3, stride=2, padding=1, output_padding=1),
-                               nn.InstanceNorm2d(out_features),
-                               nn.ReLU(inplace=True)]
+            model_tail += [nn.ConvTranspose2d(in_features, out_features, 3, stride=2, padding=1, output_padding=1),
+                           nn.InstanceNorm2d(out_features),
+                           nn.ReLU(inplace=True)]
             in_features = out_features
             out_features = in_features // 2
 
         # Output layer
-        image_tail = [nn.ReflectionPad2d(3),
-                      nn.Conv2d(64, output_nc, 7),
-                      nn.Tanh()]
-        mask_tail = [nn.ReflectionPad2d(3),
-                     nn.Conv2d(64, 1, 7)]
+        model_tail += [nn.ReflectionPad2d(3),
+                       nn.Conv2d(64, output_nc, 7),
+                       nn.Tanh()]
 
         self.model_head = nn.Sequential(*model_head)
         self.model_body = nn.Sequential(*model_body)
-        self.model_upsample = nn.Sequential(*model_upsample)
-        self.image_tail = nn.Sequential(*image_tail)
-        self.mask_tail = nn.Sequential(*mask_tail)
+        self.model_tail = nn.Sequential(*model_tail)
 
-    def forward(self, x, return_mask=False):
+    def forward(self, x):
         x = self.model_head(x)
         x = self.model_body(x)
-        x = self.model_upsample(x)
-        image = self.image_tail(x)
+        x = self.model_tail(x)
 
-        if return_mask:
-            return image, self.mask_tail(x)
+        return x
 
-        return image
+
+class SegmentationHead(nn.Module):
+    def __init__(self, input_nc):
+        super(SegmentationHead, self).__init__()
+
+        self.model = nn.Sequential(
+            nn.ReflectionPad2d(3),
+            nn.Conv2d(input_nc, 32, 7),
+            nn.InstanceNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(32, 32, 3),
+            nn.InstanceNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.ReflectionPad2d(1),
+            nn.Conv2d(32, 1, 3),
+        )
+
+    def forward(self, x):
+        return self.model(x)
 
 
 class Discriminator(nn.Module):

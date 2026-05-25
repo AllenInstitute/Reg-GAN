@@ -25,6 +25,7 @@ class Cyc_Trainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         ## def networks
         self.netG_A2B = Generator(config['input_nc'], config['output_nc']).to(self.device)
+        self.seg_net = SegmentationHead(config['output_nc']).to(self.device)
         self.netD_B = Discriminator(config['input_nc']).to(self.device)
         self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'],
                                               betas=(0.5, 0.999))
@@ -39,13 +40,13 @@ class Cyc_Trainer:
             self.netG_B2A = Generator(config['input_nc'], config['output_nc']).to(self.device)
             self.netD_A = Discriminator(config['input_nc']).to(self.device)
             self.optimizer_G = torch.optim.Adam(
-                itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters()),
+                itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters(), self.seg_net.parameters()),
                 lr=config['lr'], betas=(0.5, 0.999))
             self.optimizer_D_A = torch.optim.Adam(self.netD_A.parameters(), lr=config['lr'],
                                                   betas=(0.5, 0.999))
 
         else:
-            self.optimizer_G = torch.optim.Adam(self.netG_A2B.parameters(), lr=config['lr'],
+            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A2B.parameters(), self.seg_net.parameters()), lr=config['lr'],
                                                 betas=(0.5, 0.999))
 
         # Lossess
@@ -190,11 +191,13 @@ class Cyc_Trainer:
                         mask_A = batch['A_mask'].float().to(self.device)
                         mask_B = batch['B_mask'].float().to(self.device)
                         # GAN loss
-                        fake_B, fake_B_mask_logits = self.netG_A2B(real_A, return_mask=True)
+                        fake_B = self.netG_A2B(real_A)
+                        fake_B_mask_logits = self.seg_net(fake_B)
                         pred_fake = self.netD_B(fake_B)
                         loss_GAN_A2B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
 
-                        fake_A, fake_A_mask_logits = self.netG_B2A(real_B, return_mask=True)
+                        fake_A = self.netG_B2A(real_B)
+                        fake_A_mask_logits = self.seg_net(fake_A)
                         pred_fake = self.netD_A(fake_A)
                         loss_GAN_B2A = self.config['Adv_lamda']*self.MSE_loss(pred_fake, self.target_real)
 
@@ -322,8 +325,11 @@ class Cyc_Trainer:
                 os.makedirs(self.config["save_root"])
             ckpt_path = self.config['save_root'] + 'netG_A2B.pth'
             torch.save(self.netG_A2B.state_dict(), ckpt_path)
+            seg_ckpt_path = self.config['save_root'] + 'seg_net.pth'
+            torch.save(self.seg_net.state_dict(), seg_ckpt_path)
             if wandb.run is not None:
                 wandb.save(ckpt_path, base_path=self.config['save_root'], policy='now')
+                wandb.save(seg_ckpt_path, base_path=self.config['save_root'], policy='now')
 
             #############val###############
             val_step = (epoch - start_epoch + 1) * steps_per_epoch
@@ -338,7 +344,8 @@ class Cyc_Trainer:
                     mask_A = batch['A_mask'].float().to(self.device)
                     real_A_t = Variable(self.input_A.copy_(batch['A']))
                     real_B_t = Variable(self.input_B.copy_(batch['B']))
-                    fake_B_t, fake_B_mask_logits = self.netG_A2B(real_A_t, return_mask=True)
+                    fake_B_t = self.netG_A2B(real_A_t)
+                    fake_B_mask_logits = self.seg_net(fake_B_t)
 
                     real_B = real_B_t.detach().cpu().numpy().squeeze()
                     fake_B = fake_B_t.detach().cpu().numpy().squeeze()
