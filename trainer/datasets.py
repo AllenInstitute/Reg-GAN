@@ -1,44 +1,25 @@
 import glob
 import numpy as np
+from pathlib import Path
 import tifffile
-from skimage import filters, morphology
-from scipy import ndimage
+from skimage import io
 from torch.utils.data import Dataset
 from albumentations import Compose
 import torch
 
 
-def _get_mask(image: np.ndarray):
-    MASK_OTSU_THRESHOLD_SCALE = 0.85
-    MASK_CLOSING_RADIUS = 17
-    MASK_OPENING_RADIUS = 1
+def _load_mask(image_path: str) -> np.ndarray:
+    image_path = Path(image_path)
+    mask_path = image_path.parent.parent / "masks" / f"{image_path.stem}_mask.png"
 
-    def largest_component(mask: np.ndarray) -> np.ndarray:
-        labels, label_count = ndimage.label(mask)
-        if label_count == 0:
-            return np.zeros_like(mask, dtype=bool)
+    if not mask_path.exists():
+        raise FileNotFoundError(f"Mask not found for {image_path}: expected {mask_path}")
 
-        counts = np.bincount(labels.ravel())
-        counts[0] = 0
-        return labels == counts.argmax()
+    mask = io.imread(mask_path)
+    if mask.ndim == 3:
+        mask = mask[..., 0]
 
-    array = np.asarray(image)
-
-    if array.ndim != 2:
-        raise ValueError(f"Expected 2D image for mask generation, got shape {array.shape}")
-
-    if array.max() == array.min():
-        return np.zeros_like(array, dtype='uint8')
-
-    threshold = filters.threshold_otsu(array) * MASK_OTSU_THRESHOLD_SCALE
-    mask = array > threshold
-
-    mask = ndimage.binary_closing(mask, structure=morphology.disk(MASK_CLOSING_RADIUS))
-    mask = ndimage.binary_fill_holes(mask)
-    mask = ndimage.binary_opening(mask, structure=morphology.disk(MASK_OPENING_RADIUS))
-    mask = largest_component(mask)
-
-    return mask.astype('uint8')
+    return mask.astype(bool)
 
 class ImageDataset(Dataset):
     def __init__(self, root,noise_level,count = None,transforms_1=None,transforms_2=None, unaligned=False):
@@ -55,8 +36,8 @@ class ImageDataset(Dataset):
         with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = _get_mask(image=img_a)
-        mask_b = _get_mask(image=img_b)
+        mask_a = _load_mask(self.files_A[index % len(self.files_A)])
+        mask_b = _load_mask(self.files_B[index % len(self.files_A)])
 
         if self.noise_level == 0:
             # if noise =0, A and B make same transform
@@ -103,8 +84,8 @@ class ValDataset(Dataset):
         with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = _get_mask(image=img_a)
-        mask_b = _get_mask(image=img_b)
+        mask_a = _load_mask(self.files_A[index % len(self.files_A)])
+        mask_b = _load_mask(self.files_B[index % len(self.files_A)])
 
         item_A = self.transform(image=img_a, mask=mask_a)
         if self.unaligned:
