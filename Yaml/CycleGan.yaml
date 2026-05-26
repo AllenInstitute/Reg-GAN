@@ -17,7 +17,9 @@ epoch: 0        # starting epoch
 n_epochs: 200       # How often do you want to display output images during training
 batchSize: 1               # size of the batches
 dataroot: '/results/train'     # root directory of the dataset
+masks_path: '/results/train/masks'
 val_dataroot: '/results/val'
+val_masks_path: '/results/val/masks'
 lr: 0.0001                   # initial learning rate
 decay_epoch: 20            # epoch to start linearly decaying the learning rate to 0
 size: 512                # size of the data crop

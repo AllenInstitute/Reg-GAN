@@ -1,5 +1,6 @@
 import glob
 import numpy as np
+import random
 from pathlib import Path
 import tifffile
 from skimage import io
@@ -8,12 +9,11 @@ from albumentations import Compose
 import torch
 
 
-def _load_mask(image_path: str) -> np.ndarray:
-    image_path = Path(image_path)
-    mask_path = image_path.parent.parent / "masks" / f"{image_path.stem}_mask.png"
+def _load_mask(masks_path: str, image_stem: str) -> np.ndarray:
+    mask_path = Path(masks_path) / f"{image_stem}_mask.png"
 
     if not mask_path.exists():
-        raise FileNotFoundError(f"Mask not found for {image_path}: expected {mask_path}")
+        raise FileNotFoundError(f"Mask not found: expected {mask_path}")
 
     mask = io.imread(mask_path)
     if mask.ndim == 3:
@@ -22,22 +22,26 @@ def _load_mask(image_path: str) -> np.ndarray:
     return mask.astype(bool)
 
 class ImageDataset(Dataset):
-    def __init__(self, root,noise_level,count = None,transforms_1=None,transforms_2=None, unaligned=False):
+    def __init__(self, root, noise_level=None, count=None, transforms_1=None, transforms_2=None, unaligned=False, *, masks_path):
         self.transform1 = Compose(transforms_1)
         self.transform2 = Compose(transforms_2)
         self.files_A = sorted(glob.glob("%s/A/*" % root))
         self.files_B = sorted(glob.glob("%s/B/*" % root))
         self.unaligned = unaligned
-        self.noise_level =noise_level
+        self.noise_level = noise_level
+        self.masks_path = masks_path
 
     def __getitem__(self, index):
-        with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
+        index_A = index % len(self.files_A)
+        index_B = random.randint(0, len(self.files_B) - 1) if self.unaligned else index % len(self.files_B)
+
+        with tifffile.TiffReader(self.files_A[index_A]) as tif:
             img_a = tif.pages[0].asarray()
-        with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
+        with tifffile.TiffReader(self.files_B[index_B]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = _load_mask(self.files_A[index % len(self.files_A)])
-        mask_b = _load_mask(self.files_B[index % len(self.files_A)])
+        mask_a = _load_mask(self.masks_path, Path(self.files_A[index_A]).stem)
+        mask_b = _load_mask(self.masks_path, Path(self.files_B[index_B]).stem)
 
         if self.noise_level == 0:
             # if noise =0, A and B make same transform
@@ -72,20 +76,24 @@ class ImageDataset(Dataset):
 
 
 class ValDataset(Dataset):
-    def __init__(self, root,count = None,transforms_=None, unaligned=False):
+    def __init__(self, root,count = None,transforms_=None, unaligned=False, *, masks_path):
         self.transform = Compose(transforms_)
         self.unaligned = unaligned
         self.files_A = sorted(glob.glob("%s/A/*" % root))
         self.files_B = sorted(glob.glob("%s/B/*" % root))
+        self.masks_path = masks_path
 
     def __getitem__(self, index):
-        with tifffile.TiffReader(self.files_A[index % len(self.files_A)]) as tif:
+        index_A = index % len(self.files_A)
+        index_B = random.randint(0, len(self.files_B) - 1) if self.unaligned else index % len(self.files_B)
+
+        with tifffile.TiffReader(self.files_A[index_A]) as tif:
             img_a = tif.pages[0].asarray()
-        with tifffile.TiffReader(self.files_B[index % len(self.files_A)]) as tif:
+        with tifffile.TiffReader(self.files_B[index_B]) as tif:
             img_b = tif.pages[0].asarray()
 
-        mask_a = _load_mask(self.files_A[index % len(self.files_A)])
-        mask_b = _load_mask(self.files_B[index % len(self.files_A)])
+        mask_a = _load_mask(self.masks_path, Path(self.files_A[index_A]).stem)
+        mask_b = _load_mask(self.masks_path, Path(self.files_B[index_B]).stem)
 
         item_A = self.transform(image=img_a, mask=mask_a)
         if self.unaligned:
@@ -99,4 +107,6 @@ class ValDataset(Dataset):
             'B_mask': item_B['mask'].float().unsqueeze(0),
         }
     def __len__(self):
-        return max(len(self.files_A), len(self.files_B))
+        if self.unaligned:
+            return max(len(self.files_A), len(self.files_B))
+        return min(len(self.files_A), len(self.files_B))

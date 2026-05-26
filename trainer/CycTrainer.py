@@ -82,7 +82,7 @@ class Cyc_Trainer:
             ToTensorV2(),
         ]
 
-        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_1, unaligned=False,),
+        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_1, unaligned=True, masks_path=config['masks_path']),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
 
         val_transforms = [
@@ -97,7 +97,7 @@ class Cyc_Trainer:
             ToTensorV2(),
         ]
         
-        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_=val_transforms, unaligned=False),
+        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_=val_transforms, unaligned=False, masks_path=config['val_masks_path']),
                                 batch_size=config['batchSize'], shuffle=False, num_workers=config['n_cpu'])
 
  

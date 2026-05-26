@@ -109,7 +109,8 @@ class Unit_Trainer(nn.Module):
                 config["dataroot"],
                 transforms_1=transforms_1,
                 transforms_2=transforms_2,
-                unaligned=False,
+                unaligned=True,
+                masks_path=config["masks_path"],
             ),
             batch_size=config["batchSize"],
             shuffle=True,
@@ -123,7 +124,7 @@ class Unit_Trainer(nn.Module):
 
         self.val_data = DataLoader(
             ValDataset(
-                config["val_dataroot"], transforms_=val_transforms, unaligned=False
+                config["val_dataroot"], transforms_=val_transforms, unaligned=False, masks_path=config["val_masks_path"]
             ),
             batch_size=config["batchSize"],
             shuffle=False,

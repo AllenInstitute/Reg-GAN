@@ -63,14 +63,14 @@ class Nice_Trainer():
                    ToTensor(),
                    Resize(size_tuple = (config['size'], config['size']))]
 
-        self.dataloader = DataLoader(ImageDataset(config['dataroot'], transforms_1=transforms_1, transforms_2=transforms_2, unaligned=False),
+        self.dataloader = DataLoader(ImageDataset(config['dataroot'], transforms_1=transforms_1, transforms_2=transforms_2, unaligned=True, masks_path=config['masks_path']),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
         
         
         val_transforms = [ToTensor(),
                     Resize(size_tuple = (config['size'], config['size']))]
         
-        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_ =val_transforms, unaligned=False),
+        self.val_data = DataLoader(ValDataset(config['val_dataroot'], transforms_ =val_transforms, unaligned=False, masks_path=config['val_masks_path']),
                                 batch_size=config['batchSize'], shuffle=False, num_workers=config['n_cpu'])
 
  
@@ -392,4 +392,3 @@ class Nice_Trainer():
             
             
             
-
