@@ -19,7 +19,7 @@ def _load_mask(masks_path: str, image_stem: str) -> np.ndarray:
     if mask.ndim == 3:
         mask = mask[..., 0]
 
-    return mask.astype(bool)
+    return mask.astype('uint8')
 
 class ImageDataset(Dataset):
     def __init__(self, root, noise_level=None, count=None, transforms_1=None, transforms_2=None, unaligned=False, *, masks_path):
