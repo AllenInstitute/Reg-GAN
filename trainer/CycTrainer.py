@@ -119,6 +119,9 @@ class Cyc_Trainer:
                 SR_loss = None
                 loss_mask_A2B = None
                 loss_mask_B2A = None
+                loss_mask_A2B_bce = None
+                loss_mask_A2B_dice = None
+                train_dice_A2B = None
                 if self.config['bidirect']:   # C dir
                     if self.config['regist']:    #C + R
                         self.optimizer_R_A.zero_grad()
@@ -202,7 +205,13 @@ class Cyc_Trainer:
                         loss_GAN_B2A = self.config['Adv_lamda']*self.MSE_loss(pred_fake, self.target_real)
 
                         mask_lamda = self.config.get('Mask_lamda', 1)
-                        loss_mask_A2B = mask_lamda * self.BCE_loss(fake_B_mask_logits, mask_A)
+                        loss_mask_A2B_bce = self.BCE_loss(fake_B_mask_logits, mask_A)
+                        loss_mask_A2B_dice = self.soft_dice_loss(fake_B_mask_logits, mask_A)
+                        train_dice_A2B = self.Dice((torch.sigmoid(fake_B_mask_logits) > 0.5).float(), mask_A)
+                        loss_mask_A2B = mask_lamda * (
+                            loss_mask_A2B_bce
+                            + loss_mask_A2B_dice
+                        )
                         loss_mask_B2A = mask_lamda * self.BCE_loss(fake_A_mask_logits, mask_B)
 
                         # Cycle loss
@@ -314,6 +323,12 @@ class Cyc_Trainer:
                     losses['SR_loss'] = SR_loss
                 if loss_mask_A2B is not None:
                     losses['loss_mask_A2B'] = loss_mask_A2B
+                if loss_mask_A2B_bce is not None:
+                    losses['mask_A2B_bce'] = loss_mask_A2B_bce
+                if loss_mask_A2B_dice is not None:
+                    losses['mask_A2B_dice_loss'] = loss_mask_A2B_dice
+                if train_dice_A2B is not None:
+                    losses['Dice_B'] = train_dice_A2B
                 if loss_mask_B2A is not None:
                     losses['loss_mask_B2A'] = loss_mask_B2A
                 self.logger.log(losses=losses,
@@ -336,6 +351,9 @@ class Cyc_Trainer:
             with torch.no_grad():
                 NMI_sum = 0
                 dice_sum = 0
+                mask_bce_sum = 0
+                mask_dice_loss_sum = 0
+                mask_loss_sum = 0
                 num = 0
                 val_images = []
                 for i, batch in enumerate(self.val_data):
@@ -353,7 +371,13 @@ class Cyc_Trainer:
                     NMI_sum += nmi
                     fake_B_mask = (torch.sigmoid(fake_B_mask_logits) > 0.5).float()
                     dice = self.Dice(fake_B_mask, mask_A)
+                    mask_bce = self.BCE_loss(fake_B_mask_logits, mask_A)
+                    mask_dice_loss = self.soft_dice_loss(fake_B_mask_logits, mask_A)
+                    mask_loss = self.config.get('Mask_lamda', 1) * (mask_bce + mask_dice_loss)
                     dice_sum += dice.item()
+                    mask_bce_sum += mask_bce.item()
+                    mask_dice_loss_sum += mask_dice_loss.item()
+                    mask_loss_sum += mask_loss.item()
                     num += 1
 
                     real_A_cpu = real_A_t.detach().cpu()
@@ -371,11 +395,21 @@ class Cyc_Trainer:
 
                 val_nmi = NMI_sum / num
                 val_dice = dice_sum / num
+                val_mask_bce = mask_bce_sum / num
+                val_mask_dice_loss = mask_dice_loss_sum / num
+                val_mask_loss = mask_loss_sum / num
                 print('Val NMI:', val_nmi)
                 print('Val Dice_B:', val_dice)
 
                 if wandb.run is not None:
-                    log_dict = {'val/NMI': val_nmi, 'val/Dice_B': val_dice, 'epoch': epoch}
+                    log_dict = {
+                        'val/NMI': val_nmi,
+                        'val/Dice_B': val_dice,
+                        'val/mask_A2B_bce': val_mask_bce,
+                        'val/mask_A2B_dice_loss': val_mask_dice_loss,
+                        'val/loss_mask_A2B': val_mask_loss,
+                        'epoch': epoch,
+                    }
                     sample_count = min(5, len(val_images))
                     sample_indices = np.random.choice(len(val_images), sample_count, replace=False)
                     for sample_idx, val_idx in enumerate(sample_indices):
@@ -437,6 +471,13 @@ class Cyc_Trainer:
         intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
         denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
         return ((2 * intersection + eps) / (denominator + eps)).mean()
+
+    def soft_dice_loss(self, logits, target_mask, eps=1e-7):
+        pred_mask = torch.sigmoid(logits)
+        target_mask = target_mask.float()
+        intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
+        denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
+        return 1 - ((2 * intersection + eps) / (denominator + eps)).mean()
 
     @staticmethod
     def mask_error_image(pred_mask, target_mask):
