@@ -24,7 +24,7 @@ class Cyc_Trainer:
         self.config = config
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         ## def networks
-        self.netG_A2B = Generator(config['input_nc'] + 1, config['output_nc']).to(self.device)
+        self.netG_A2B = Generator(config['input_nc'], config['output_nc']).to(self.device)
         self.seg_net = SegmentationHead(config['output_nc']).to(self.device)
         self.netD_B = Discriminator(config['input_nc']).to(self.device)
         self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'],
@@ -113,8 +113,6 @@ class Cyc_Trainer:
                 global_step = (epoch - start_epoch) * steps_per_epoch + i
                 batch['A'] = batch['A'].to(self.device)
                 batch['B'] = batch['B'].to(self.device)
-                mask_A = batch['A_mask'].float().to(self.device)
-                mask_B = batch['B_mask'].float().to(self.device)
                 # Set model input
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
@@ -129,7 +127,7 @@ class Cyc_Trainer:
                         self.optimizer_R_A.zero_grad()
                         self.optimizer_G.zero_grad()
                         # GAN loss
-                        fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                        fake_B = self.netG_A2B(real_A)
                         pred_fake = self.netD_B(fake_B)
                         loss_GAN_A2B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
                         
@@ -146,7 +144,7 @@ class Cyc_Trainer:
                         recovered_A = self.netG_B2A(fake_B)
                         loss_cycle_ABA = self.config['Cyc_lamda'] * self.L1_loss(recovered_A, real_A)
 
-                        recovered_B = self.netG_A2B(self.a2b_input(fake_A, mask_B))
+                        recovered_B = self.netG_A2B(fake_A)
                         loss_cycle_BAB = self.config['Cyc_lamda'] * self.L1_loss(recovered_B, real_B)
 
                         # Total loss
@@ -193,8 +191,10 @@ class Cyc_Trainer:
                     
                     else: #only  dir:  C
                         self.optimizer_G.zero_grad()
+                        mask_A = batch['A_mask'].float().to(self.device)
+                        mask_B = batch['B_mask'].float().to(self.device)
                         # GAN loss
-                        fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                        fake_B = self.netG_A2B(real_A)
                         fake_B_mask_logits = self.seg_net(fake_B)
                         pred_fake = self.netD_B(fake_B)
                         loss_GAN_A2B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
@@ -218,7 +218,7 @@ class Cyc_Trainer:
                         recovered_A = self.netG_B2A(fake_B)
                         loss_cycle_ABA = self.config['Cyc_lamda'] * self.L1_loss(recovered_A, real_A)
 
-                        recovered_B = self.netG_A2B(self.a2b_input(fake_A, mask_B))
+                        recovered_B = self.netG_A2B(fake_A)
                         loss_cycle_BAB = self.config['Cyc_lamda'] * self.L1_loss(recovered_B, real_B)
 
                         # Total loss
@@ -269,7 +269,7 @@ class Cyc_Trainer:
                         self.optimizer_R_A.zero_grad()
                         self.optimizer_G.zero_grad()
                         #### regist sys loss
-                        fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                        fake_B = self.netG_A2B(real_A)
                         Trans = self.R_A(fake_B,real_B) 
                         SysRegist_A2B = self.spatial_transform(fake_B,Trans)
                         SR_loss = self.config['Corr_lamda'] * self.L1_loss(SysRegist_A2B,real_B)###SR
@@ -283,7 +283,7 @@ class Cyc_Trainer:
                         self.optimizer_G.step()
                         self.optimizer_D_B.zero_grad()
                         with torch.no_grad():
-                            fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                            fake_B = self.netG_A2B(real_A)
                         pred_fake0 = self.netD_B(fake_B)
                         pred_real = self.netD_B(real_B)
                         loss_D_B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake0, self.target_fake)+self.config['Adv_lamda'] * self.MSE_loss(pred_real, self.target_real)
@@ -296,7 +296,7 @@ class Cyc_Trainer:
                         
                     else:        # only NC
                         self.optimizer_G.zero_grad()
-                        fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                        fake_B = self.netG_A2B(real_A)
                         #### GAN aligin loss
                         pred_fake = self.netD_B(fake_B)
                         adv_loss = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
@@ -362,7 +362,7 @@ class Cyc_Trainer:
                     mask_A = batch['A_mask'].float().to(self.device)
                     real_A_t = Variable(self.input_A.copy_(batch['A']))
                     real_B_t = Variable(self.input_B.copy_(batch['B']))
-                    fake_B_t = self.netG_A2B(self.a2b_input(real_A_t, mask_A))
+                    fake_B_t = self.netG_A2B(real_A_t)
                     fake_B_mask_logits = self.seg_net(fake_B_t)
 
                     real_B = real_B_t.detach().cpu().numpy().squeeze()
@@ -434,13 +434,10 @@ class Cyc_Trainer:
                 SSIM = 0
                 num = 0
                 for i, batch in enumerate(self.val_data):
-                    batch['A'] = batch['A'].to(self.device)
-                    batch['B'] = batch['B'].to(self.device)
-                    mask_A = batch['A_mask'].float().to(self.device)
                     real_A = Variable(self.input_A.copy_(batch['A']))
                     real_B = Variable(self.input_B.copy_(batch['B'])).detach().cpu().numpy().squeeze()
                     
-                    fake_B = self.netG_A2B(self.a2b_input(real_A, mask_A))
+                    fake_B = self.netG_A2B(real_A)
                     fake_B = fake_B.detach().cpu().numpy().squeeze()                                                 
                     mae = self.MAE(fake_B,real_B)
                     psnr = self.PSNR(fake_B,real_B)
@@ -474,10 +471,6 @@ class Cyc_Trainer:
         intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
         denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
         return ((2 * intersection + eps) / (denominator + eps)).mean()
-
-    @staticmethod
-    def a2b_input(image, mask):
-        return torch.cat([image, mask], dim=1)
 
     def soft_dice_loss(self, logits, target_mask, eps=1e-7):
         pred_mask = torch.sigmoid(logits)
