@@ -10,7 +10,7 @@ image_save: '/results/Cyc/C/img/'
 # lamda weight
 Adv_lamda: 1
 Cyc_lamda: 10
-Mask_lamda: 5
+Mask_lamda: 1
 
 
 epoch: 0        # starting epoch
