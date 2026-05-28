@@ -11,6 +11,7 @@ image_save: '/results/Cyc/C/img/'
 Adv_lamda: 1
 Cyc_lamda: 10
 Mask_lamda: 1
+Identity_lamda: 5
 
 
 epoch: 0        # starting epoch

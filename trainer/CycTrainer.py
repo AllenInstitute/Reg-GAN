@@ -121,6 +121,8 @@ class Cyc_Trainer:
                 loss_mask_B2A = None
                 loss_mask_A2B_bce = None
                 loss_mask_A2B_dice = None
+                loss_identity_A2B = None
+                loss_identity_B2A = None
                 train_dice_A2B = None
                 if self.config['bidirect']:   # C dir
                     if self.config['regist']:    #C + R
@@ -214,6 +216,10 @@ class Cyc_Trainer:
                         )
                         loss_mask_B2A = mask_lamda * self.BCE_loss(fake_A_mask_logits, mask_B)
 
+                        identity_lamda = self.config.get('Identity_lamda', 0)
+                        loss_identity_A2B = identity_lamda * self.L1_loss(self.netG_A2B(real_B), real_B)
+                        loss_identity_B2A = identity_lamda * self.L1_loss(self.netG_B2A(real_A), real_A)
+
                         # Cycle loss
                         recovered_A = self.netG_B2A(fake_B)
                         loss_cycle_ABA = self.config['Cyc_lamda'] * self.L1_loss(recovered_A, real_A)
@@ -222,7 +228,7 @@ class Cyc_Trainer:
                         loss_cycle_BAB = self.config['Cyc_lamda'] * self.L1_loss(recovered_B, real_B)
 
                         # Total loss
-                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + loss_mask_A2B + loss_mask_B2A
+                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + loss_mask_A2B + loss_mask_B2A + loss_identity_A2B + loss_identity_B2A
                         loss_Total.backward()
                         self.optimizer_G.step()
 
@@ -329,6 +335,10 @@ class Cyc_Trainer:
                     losses['mask_A2B_dice_loss'] = loss_mask_A2B_dice
                 if train_dice_A2B is not None:
                     losses['Dice_B'] = train_dice_A2B
+                if loss_identity_A2B is not None:
+                    losses['loss_identity_A2B'] = loss_identity_A2B
+                if loss_identity_B2A is not None:
+                    losses['loss_identity_B2A'] = loss_identity_B2A
                 if loss_mask_B2A is not None:
                     losses['loss_mask_B2A'] = loss_mask_B2A
                 self.logger.log(losses=losses,
