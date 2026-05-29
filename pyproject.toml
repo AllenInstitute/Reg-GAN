@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "albumentations>=2.0.8",
+    "albumentationsx[headless]~=2.0.14",
     "click>=8.3.1",
     "loguru>=0.7.3",
     "matplotlib>=3.10.9",
@@ -16,7 +16,7 @@ dependencies = [
     "pillow>=12.0.0",
     "pyyaml>=6.0.3",
     "scikit-image>=0.26.0",
-    "scipy>=1.16.3",
+    "scipy>=1.15.3,<1.16",
     "segmentation-models-pytorch>=0.5.0",
     "tifffile>=2026.5.2",
     "torch>=2.11.0",
