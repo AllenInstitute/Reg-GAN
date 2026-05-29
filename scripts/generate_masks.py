@@ -11,7 +11,7 @@ from skimage import measure
 from scipy import ndimage
 import torch
 
-from train_segmentation_model import TissueMaskModel
+from scripts.train_segmentation_model import TissueMaskModel
 
 
 def largest_component(mask: np.ndarray) -> np.ndarray:
@@ -116,7 +116,7 @@ def main(checkpoint_path: Path, input_dir: Path, output_dir: Path, threshold: fl
         fname = Path(file).stem
         Image.fromarray(mask).save(output_dir / f'{fname}_mask.png')
 
-if __name__ == '__main__':
+def cli():
     parser = argparse.ArgumentParser()
     parser.add_argument('--display', action='store_true', help='Write sampled generated masks figure to /scratch/fig.png.')
     parser.add_argument('--checkpoint-path', type=Path, required=False, help='Lightning checkpoint from train_segmentation_model.py.')
@@ -138,3 +138,7 @@ if __name__ == '__main__':
             threshold=args.threshold,
             limit=args.limit,
         )
+
+
+if __name__ == '__main__':
+    cli()
