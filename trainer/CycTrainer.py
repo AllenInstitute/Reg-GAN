@@ -11,10 +11,9 @@ from Model.CycleGan import *
 from .utils import smooothing_loss
 from .utils import Logger
 from .reg import Reg
-from albumentations import Affine, ToTensorV2, Normalize, PadIfNeeded, RandomCrop, SquareSymmetry
+from albumentations import Affine, ToTensorV2, Normalize, PadIfNeeded, RandomCrop, SquareSymmetry, SmallestMaxSize
 from .transformer import Transformer_2D
 from skimage import measure
-from skimage.metrics import normalized_mutual_information
 import numpy as np
 import cv2
 
@@ -25,7 +24,6 @@ class Cyc_Trainer:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         ## def networks
         self.netG_A2B = Generator(config['input_nc'], config['output_nc']).to(self.device)
-        self.seg_net = SegmentationHead(config['output_nc']).to(self.device)
         self.netD_B = Discriminator(config['input_nc']).to(self.device)
         self.optimizer_D_B = torch.optim.Adam(self.netD_B.parameters(), lr=config['lr'],
                                               betas=(0.5, 0.999))
@@ -40,19 +38,18 @@ class Cyc_Trainer:
             self.netG_B2A = Generator(config['input_nc'], config['output_nc']).to(self.device)
             self.netD_A = Discriminator(config['input_nc']).to(self.device)
             self.optimizer_G = torch.optim.Adam(
-                itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters(), self.seg_net.parameters()),
+                itertools.chain(self.netG_A2B.parameters(), self.netG_B2A.parameters()),
                 lr=config['lr'], betas=(0.5, 0.999))
             self.optimizer_D_A = torch.optim.Adam(self.netD_A.parameters(), lr=config['lr'],
                                                   betas=(0.5, 0.999))
 
         else:
-            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A2B.parameters(), self.seg_net.parameters()), lr=config['lr'],
+            self.optimizer_G = torch.optim.Adam(self.netG_A2B.parameters(), lr=config['lr'],
                                                 betas=(0.5, 0.999))
 
         # Lossess
         self.MSE_loss = torch.nn.MSELoss()
         self.L1_loss = torch.nn.L1Loss()
-        self.BCE_loss = torch.nn.BCEWithLogitsLoss()
 
         # Inputs & targets memory allocation
         self.input_A = torch.empty(config['batchSize'], config['input_nc'], config['size'],
@@ -76,13 +73,12 @@ class Cyc_Trainer:
                 min_height=config['size'],
                 min_width=config['size'],
                 fill=-1,
-                fill_mask=0,
             ),
             RandomCrop(height=config['size'], width=config['size']),
             ToTensorV2(),
         ]
 
-        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_1, unaligned=True, masks_path=config['masks_path']),
+        self.dataloader = DataLoader(ImageDataset(config['dataroot'], level, transforms_1=transforms_1, transforms_2=transforms_1, unaligned=True),
                                 batch_size=config['batchSize'], shuffle=True, num_workers=config['n_cpu'])
 
         val_transforms = [
@@ -117,13 +113,8 @@ class Cyc_Trainer:
                 real_A = Variable(self.input_A.copy_(batch['A']))
                 real_B = Variable(self.input_B.copy_(batch['B']))
                 SR_loss = None
-                loss_mask_A2B = None
-                loss_mask_B2A = None
-                loss_mask_A2B_bce = None
-                loss_mask_A2B_dice = None
                 loss_identity_A2B = None
                 loss_identity_B2A = None
-                train_dice_A2B = None
                 if self.config['bidirect']:   # C dir
                     if self.config['regist']:    #C + R
                         self.optimizer_R_A.zero_grad()
@@ -193,28 +184,14 @@ class Cyc_Trainer:
                     
                     else: #only  dir:  C
                         self.optimizer_G.zero_grad()
-                        mask_A = batch['A_mask'].float().to(self.device)
-                        mask_B = batch['B_mask'].float().to(self.device)
                         # GAN loss
                         fake_B = self.netG_A2B(real_A)
-                        fake_B_mask_logits = self.seg_net(fake_B)
                         pred_fake = self.netD_B(fake_B)
                         loss_GAN_A2B = self.config['Adv_lamda'] * self.MSE_loss(pred_fake, self.target_real)
 
                         fake_A = self.netG_B2A(real_B)
-                        fake_A_mask_logits = self.seg_net(fake_A)
                         pred_fake = self.netD_A(fake_A)
                         loss_GAN_B2A = self.config['Adv_lamda']*self.MSE_loss(pred_fake, self.target_real)
-
-                        mask_lamda = self.config.get('Mask_lamda', 1)
-                        loss_mask_A2B_bce = self.BCE_loss(fake_B_mask_logits, mask_A)
-                        loss_mask_A2B_dice = self.soft_dice_loss(fake_B_mask_logits, mask_A)
-                        train_dice_A2B = self.Dice((torch.sigmoid(fake_B_mask_logits) > 0.5).float(), mask_A)
-                        loss_mask_A2B = mask_lamda * (
-                            loss_mask_A2B_bce
-                            + loss_mask_A2B_dice
-                        )
-                        loss_mask_B2A = mask_lamda * self.BCE_loss(fake_A_mask_logits, mask_B)
 
                         identity_lamda = self.config.get('Identity_lamda', 0)
                         loss_identity_A2B = identity_lamda * self.L1_loss(self.netG_A2B(real_B), real_B)
@@ -228,7 +205,7 @@ class Cyc_Trainer:
                         loss_cycle_BAB = self.config['Cyc_lamda'] * self.L1_loss(recovered_B, real_B)
 
                         # Total loss
-                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + loss_mask_A2B + loss_mask_B2A + loss_identity_A2B + loss_identity_B2A
+                        loss_Total = loss_GAN_A2B + loss_GAN_B2A + loss_cycle_ABA + loss_cycle_BAB + loss_identity_A2B + loss_identity_B2A
                         loss_Total.backward()
                         self.optimizer_G.step()
 
@@ -327,20 +304,10 @@ class Cyc_Trainer:
                 losses = {'loss_D_B': loss_D_B}
                 if SR_loss is not None:
                     losses['SR_loss'] = SR_loss
-                if loss_mask_A2B is not None:
-                    losses['loss_mask_A2B'] = loss_mask_A2B
-                if loss_mask_A2B_bce is not None:
-                    losses['mask_A2B_bce'] = loss_mask_A2B_bce
-                if loss_mask_A2B_dice is not None:
-                    losses['mask_A2B_dice_loss'] = loss_mask_A2B_dice
-                if train_dice_A2B is not None:
-                    losses['Dice_B'] = train_dice_A2B
                 if loss_identity_A2B is not None:
                     losses['loss_identity_A2B'] = loss_identity_A2B
                 if loss_identity_B2A is not None:
                     losses['loss_identity_B2A'] = loss_identity_B2A
-                if loss_mask_B2A is not None:
-                    losses['loss_mask_B2A'] = loss_mask_B2A
                 self.logger.log(losses=losses,
                                 iteration=global_step,
                                 )
@@ -350,86 +317,50 @@ class Cyc_Trainer:
                 os.makedirs(self.config["save_root"])
             ckpt_path = self.config['save_root'] + 'netG_A2B.pth'
             torch.save(self.netG_A2B.state_dict(), ckpt_path)
-            seg_ckpt_path = self.config['save_root'] + 'seg_net.pth'
-            torch.save(self.seg_net.state_dict(), seg_ckpt_path)
             if wandb.run is not None:
                 wandb.save(ckpt_path, base_path=self.config['save_root'], policy='now')
-                wandb.save(seg_ckpt_path, base_path=self.config['save_root'], policy='now')
 
             #############val###############
             val_step = (epoch - start_epoch + 1) * steps_per_epoch
             with torch.no_grad():
-                NMI_sum = 0
-                dice_sum = 0
-                mask_bce_sum = 0
-                mask_dice_loss_sum = 0
-                mask_loss_sum = 0
+                NMAE_sum = 0
                 num = 0
                 val_images = []
                 for i, batch in enumerate(self.val_data):
                     batch['A'] = batch['A'].to(self.device)
                     batch['B'] = batch['B'].to(self.device)
-                    mask_A = batch['A_mask'].float().to(self.device)
+                    mask_B = batch['B_mask'].float().to(self.device)
                     real_A_t = Variable(self.input_A.copy_(batch['A']))
                     real_B_t = Variable(self.input_B.copy_(batch['B']))
                     fake_B_t = self.netG_A2B(real_A_t)
-                    fake_B_mask_logits = self.seg_net(fake_B_t)
 
-                    real_B = real_B_t.detach().cpu().numpy().squeeze()
-                    fake_B = fake_B_t.detach().cpu().numpy().squeeze()
-                    nmi = normalized_mutual_information(real_B, fake_B)
-                    NMI_sum += nmi
-                    fake_B_mask = (torch.sigmoid(fake_B_mask_logits) > 0.5).float()
-                    dice = self.Dice(fake_B_mask, mask_A)
-                    mask_bce = self.BCE_loss(fake_B_mask_logits, mask_A)
-                    mask_dice_loss = self.soft_dice_loss(fake_B_mask_logits, mask_A)
-                    mask_loss = self.config.get('Mask_lamda', 1) * (mask_bce + mask_dice_loss)
-                    dice_sum += dice.item()
-                    mask_bce_sum += mask_bce.item()
-                    mask_dice_loss_sum += mask_dice_loss.item()
-                    mask_loss_sum += mask_loss.item()
+                    nmae = self.NMAE(fake_B_t, real_B_t, mask_B)
+                    NMAE_sum += nmae.item()
                     num += 1
 
                     real_A_cpu = real_A_t.detach().cpu()
                     real_B_cpu = real_B_t.detach().cpu()
                     fake_B_cpu = fake_B_t.detach().cpu()
-                    target_mask_cpu = mask_A.detach().cpu()
-                    pred_mask_cpu = fake_B_mask.detach().cpu()
                     for b in range(real_A_cpu.shape[0]):
                         val_images.append({
                             'real_A': real_A_cpu[b],
                             'real_B': real_B_cpu[b],
                             'fake_B': fake_B_cpu[b],
-                            'mask_error_B': Cyc_Trainer.mask_error_image(pred_mask_cpu[b], target_mask_cpu[b]),
                         })
 
-                val_nmi = NMI_sum / num
-                val_dice = dice_sum / num
-                val_mask_bce = mask_bce_sum / num
-                val_mask_dice_loss = mask_dice_loss_sum / num
-                val_mask_loss = mask_loss_sum / num
-                print('Val NMI:', val_nmi)
-                print('Val Dice_B:', val_dice)
+                val_nmae = NMAE_sum / num
+                print('Val NMAE:', val_nmae)
 
                 if wandb.run is not None:
                     log_dict = {
-                        'val/NMI': val_nmi,
-                        'val/Dice_B': val_dice,
-                        'val/mask_A2B_bce': val_mask_bce,
-                        'val/mask_A2B_dice_loss': val_mask_dice_loss,
-                        'val/loss_mask_A2B': val_mask_loss,
+                        'val/NMAE': val_nmae,
                         'epoch': epoch,
                     }
                     sample_count = min(5, len(val_images))
                     sample_indices = np.random.choice(len(val_images), sample_count, replace=False)
                     for sample_idx, val_idx in enumerate(sample_indices):
                         for name, tensor in val_images[val_idx].items():
-                            if name == 'mask_error_B':
-                                arr = (tensor.permute(1, 2, 0) * 255).numpy().astype('uint8')
-                            elif 'mask' in name:
-                                arr = (tensor * 255).numpy().astype('uint8')
-                            else:
-                                arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
+                            arr = (((tensor + 1) / 2) * 255).numpy().astype('uint8')
                             log_dict[f'val/{val_step}/{sample_idx}/{name}'] = wandb.Image(arr)
                     wandb.log(log_dict, step=val_step)
                 
@@ -475,31 +406,11 @@ class Cyc_Trainer:
         mae = np.abs(fake[x,y]-real[x,y]).mean()
         return mae/2     #from (-1,1) normaliz  to (0,1)            
 
-    def Dice(self, pred_mask, target_mask, eps=1e-7):
-        pred_mask = pred_mask.float()
-        target_mask = target_mask.float()
-        intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
-        denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
-        return ((2 * intersection + eps) / (denominator + eps)).mean()
-
-    def soft_dice_loss(self, logits, target_mask, eps=1e-7):
-        pred_mask = torch.sigmoid(logits)
-        target_mask = target_mask.float()
-        intersection = (pred_mask * target_mask).sum(dim=(1, 2, 3))
-        denominator = pred_mask.sum(dim=(1, 2, 3)) + target_mask.sum(dim=(1, 2, 3))
-        return 1 - ((2 * intersection + eps) / (denominator + eps)).mean()
-
-    @staticmethod
-    def mask_error_image(pred_mask, target_mask):
-        pred_mask = pred_mask.squeeze(0) > 0.5
-        target_mask = target_mask.squeeze(0) > 0.5
-        mask_error = torch.zeros(3, *target_mask.shape, dtype=torch.float32)
-
-        mask_error[1][pred_mask & target_mask] = 1.0
-        mask_error[0][pred_mask & ~target_mask] = 1.0
-        mask_error[2][~pred_mask & target_mask] = 1.0
-
-        return mask_error
+    def NMAE(self, fake, real, mask):
+        valid_mask = (mask > 0.5).expand_as(fake)
+        if not valid_mask.any():
+            return fake.new_tensor(0.0)
+        return (torch.abs(fake[valid_mask] - real[valid_mask]) / 2).mean()
 
     def save_deformation(self,defms,root):
         heatmapshow = None

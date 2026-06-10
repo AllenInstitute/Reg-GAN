@@ -1,11 +1,10 @@
 #####
 name: CycleGan
-bidirect: True #Unidirectional or bidirectional
-regist: False    # With or without registration network
+bidirect: False #Unidirectional or bidirectional
+regist: True    # With or without registration network
 noise_level: 0  #  noise level
 port: 6019   #  port parameters
-save_root: '/results/Cyc/C/'
-image_save: '/results/Cyc/C/img/'
+save_root: '/output/Cyc/C/'
 
 # lamda weight
 Adv_lamda: 1
@@ -31,4 +30,4 @@ n_cpu: 8
 
 use_wandb: true
 wandb_project: reg-gan-FISH
-wandb_entity: knowledge-engineering
+wandb_entity: brain-science
